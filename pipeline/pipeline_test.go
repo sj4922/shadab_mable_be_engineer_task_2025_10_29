@@ -22,6 +22,7 @@ type TestStruct struct {
 	Note    string
 }
 
+// generateInput creates a slice of TestStruct with n elements for testing
 func generateInput(n int) []TestStruct {
 	input := make([]TestStruct, n)
 	for i := 0; i < n; i++ {
@@ -41,6 +42,7 @@ func generateInput(n int) []TestStruct {
 	return input
 }
 
+// getDynamicConfig computes optimal number of workers and batch size based on input size
 func getDynamicConfig(inputSize int) (numWorkers, batchSize int) {
 	numWorkers = runtime.NumCPU()
 	if numWorkers < 1 {
@@ -64,6 +66,7 @@ func getDynamicConfig(inputSize int) (numWorkers, batchSize int) {
 	return numWorkers, batchSize
 }
 
+// fullPipeline builds a complex pipeline of stages for processing TestStruct elements
 func fullPipeline(inputSize int) Stage[TestStruct, TestStruct] {
 	numWorkers, batchSize := getDynamicConfig(inputSize)
 
@@ -115,6 +118,7 @@ func fullPipeline(inputSize int) Stage[TestStruct, TestStruct] {
 	))
 }
 
+// Tests MapStage with integer multiplication
 func TestMapStage(t *testing.T) {
 	input := []int{1, 2, 3}
 	output := Collect(MapStage[int](func(x int) int { return x * 2 }), input)
@@ -123,6 +127,7 @@ func TestMapStage(t *testing.T) {
 	}
 }
 
+// Tests FilterStage with even number filtering
 func TestFilterStage(t *testing.T) {
 	input := []int{1, 2, 3, 4}
 	output := Collect(FilterStage[int](func(x int) bool { return x%2 == 0 }), input)
@@ -131,6 +136,7 @@ func TestFilterStage(t *testing.T) {
 	}
 }
 
+// Tests ReduceStage with value conversion
 func TestReduceStage(t *testing.T) {
 	input := []int{1, 2, 3}
 	output := Collect(ReduceStage[int, string](func(x int) string { return string('a' + rune(x-1)) }), input)
@@ -139,6 +145,7 @@ func TestReduceStage(t *testing.T) {
 	}
 }
 
+// Tests GenerateStage with slice expansion
 func TestGenerateStage(t *testing.T) {
 	input := []int{1, 2}
 	output := Collect(GenerateStage[int](func(x int) []int { return []int{x, x + 1} }), input)
@@ -147,6 +154,7 @@ func TestGenerateStage(t *testing.T) {
 	}
 }
 
+// Tests IfStage with conditional mapping
 func TestIfStage(t *testing.T) {
 	input := []int{1, 2, 3, 4}
 	stage := IfStage[int, int](
@@ -162,6 +170,7 @@ func TestIfStage(t *testing.T) {
 	}
 }
 
+// Tests FanOutStage with parallel processing
 func TestFanOutStage(t *testing.T) {
 	input := []int{1, 2, 3, 4}
 	output := Collect(FanOutStage[int, int](2, MapStage[int](func(x int) int { return x * 2 })), input)
@@ -172,6 +181,7 @@ func TestFanOutStage(t *testing.T) {
 	}
 }
 
+// Tests BatchStage with batching logic
 func TestBatchStage(t *testing.T) {
 	input := []int{1, 2, 3, 4, 5}
 	output := Collect(BatchStage[int](3), input)
@@ -180,6 +190,7 @@ func TestBatchStage(t *testing.T) {
 	}
 }
 
+// Tests FlattenStage with slice flattening
 func TestFlattenStage(t *testing.T) {
 	input := [][]int{{1, 2}, {3, 4, 5}}
 	output := Collect(FlattenStage[int](), input)
@@ -188,6 +199,7 @@ func TestFlattenStage(t *testing.T) {
 	}
 }
 
+// Tests ForEachStage with slice mapping
 func TestForEachStage(t *testing.T) {
 	input := [][]int{{1, 2}, {3, 4}}
 	output := Collect(ForEachStage[int, int](MapStage[int](func(x int) int { return x * 2 })), input)
@@ -196,6 +208,7 @@ func TestForEachStage(t *testing.T) {
 	}
 }
 
+// Tests ParallelPipeline with concurrent execution
 func TestParallelPipeline(t *testing.T) {
 	input := []int{1, 2, 3, 4, 5, 6}
 	output := Collect(ParallelPipeline[int, int](MapStage[int](func(x int) int { return x * 2 }), 2, 3), input)
@@ -206,6 +219,7 @@ func TestParallelPipeline(t *testing.T) {
 	}
 }
 
+// Tests Collect function
 func TestCollect(t *testing.T) {
 	input := []string{"a", "b", "c"}
 	output := Collect(MapStage[string](func(s string) string { return s + "!" }), input)
@@ -214,6 +228,7 @@ func TestCollect(t *testing.T) {
 	}
 }
 
+// Tests Chain with stage composition
 func TestChain(t *testing.T) {
 	input := []int{1, 2, 3}
 	stage := Chain(
@@ -226,6 +241,7 @@ func TestChain(t *testing.T) {
 	}
 }
 
+// Tests MetricStage with instrumentation
 func TestMetricStage(t *testing.T) {
 	input := []int{1, 2}
 	output := Collect(MetricStage[int, int]("test", MapStage[int](func(x int) int { return x })), input)
@@ -234,6 +250,7 @@ func TestMetricStage(t *testing.T) {
 	}
 }
 
+// Tests MapStage with empty input
 func TestMapStageEmptyInput(t *testing.T) {
 	output := Collect(MapStage[int](func(x int) int { return x * 2 }), []int{})
 	if !reflect.DeepEqual(output, []int{}) {
@@ -241,6 +258,7 @@ func TestMapStageEmptyInput(t *testing.T) {
 	}
 }
 
+// Tests FilterStage with empty input
 func TestFilterStageEmptyInput(t *testing.T) {
 	output := Collect(FilterStage[int](func(x int) bool { return x%2 == 0 }), []int{})
 	if !reflect.DeepEqual(output, []int{}) {
@@ -248,6 +266,7 @@ func TestFilterStageEmptyInput(t *testing.T) {
 	}
 }
 
+// Tests GenerateStage with empty input
 func TestGenerateStageEmptyInput(t *testing.T) {
 	output := Collect(GenerateStage[int](func(x int) []int { return []int{x, x + 1} }), []int{})
 	if !reflect.DeepEqual(output, []int{}) {
@@ -255,6 +274,7 @@ func TestGenerateStageEmptyInput(t *testing.T) {
 	}
 }
 
+// Tests IfStage with empty input
 func TestIfStageEmptyInput(t *testing.T) {
 	stage := IfStage[int, int](
 		func(x int) bool { return x%2 == 0 },
@@ -267,6 +287,7 @@ func TestIfStageEmptyInput(t *testing.T) {
 	}
 }
 
+// Tests FanOutStage with single worker
 func TestFanOutStageSingleWorker(t *testing.T) {
 	input := []int{1, 2, 3}
 	output := Collect(FanOutStage[int, int](1, MapStage[int](func(x int) int { return x * 2 })), input)
@@ -275,6 +296,7 @@ func TestFanOutStageSingleWorker(t *testing.T) {
 	}
 }
 
+// Tests BatchStage with empty input
 func TestBatchStageEmptyInput(t *testing.T) {
 	output := Collect(BatchStage[int](3), []int{})
 	if !reflect.DeepEqual(output, [][]int{}) {
@@ -282,6 +304,7 @@ func TestBatchStageEmptyInput(t *testing.T) {
 	}
 }
 
+// Tests FlattenStage with empty input
 func TestFlattenStageEmptyInput(t *testing.T) {
 	output := Collect(FlattenStage[int](), [][]int{})
 	if !reflect.DeepEqual(output, []int{}) {
@@ -289,6 +312,7 @@ func TestFlattenStageEmptyInput(t *testing.T) {
 	}
 }
 
+// Tests DefaultMetricsConfig with environment variables
 func TestDefaultMetricsConfig(t *testing.T) {
 	t.Setenv("CLICKHOUSE_HOST", "test-host")
 	t.Setenv("CLICKHOUSE_PORT", "1234")
@@ -308,6 +332,7 @@ func TestDefaultMetricsConfig(t *testing.T) {
 	}
 }
 
+// Tests DefaultMetricsConfig with default values
 func TestDefaultMetricsConfigDefaults(t *testing.T) {
 	t.Setenv("CLICKHOUSE_HOST", "")
 	t.Setenv("CLICKHOUSE_PORT", "")
@@ -327,30 +352,37 @@ func TestDefaultMetricsConfigDefaults(t *testing.T) {
 	}
 }
 
+// BenchmarkFullPipeline10 benchmarks the full pipeline with 10 events
 func BenchmarkFullPipeline10(b *testing.B) {
 	benchmarkFullPipeline(b, 10)
 }
 
+// BenchmarkFullPipeline100 benchmarks the full pipeline with 100 events
 func BenchmarkFullPipeline100(b *testing.B) {
 	benchmarkFullPipeline(b, 100)
 }
 
+// BenchmarkFullPipeline1000 benchmarks the full pipeline with 10,000 events
 func BenchmarkFullPipeline1000(b *testing.B) {
 	benchmarkFullPipeline(b, 10000)
 }
 
+// BenchmarkFullPipeline100000 benchmarks the full pipeline with 100,000 events
 func BenchmarkFullPipeline100000(b *testing.B) {
 	benchmarkFullPipeline(b, 100000)
 }
 
+// BenchmarkFullPipeline1000000 benchmarks the full pipeline with 1,000,000 events
 func BenchmarkFullPipeline1000000(b *testing.B) {
 	benchmarkFullPipeline(b, 1000000)
 }
 
+// BenchmarkFullPipeline10000000 benchmarks the full pipeline with 10,000,000 events
 func BenchmarkFullPipeline10000000(b *testing.B) {
 	benchmarkFullPipeline(b, 10000000)
 }
 
+// benchmarkFullPipeline runs the full pipeline n times and logs performance metrics
 func benchmarkFullPipeline(b *testing.B, n int) {
 	input := generateInput(n)
 	stage := fullPipeline(n)
