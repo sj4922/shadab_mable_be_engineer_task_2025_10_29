@@ -18,6 +18,7 @@ var (
 	metricsEnabled bool
 )
 
+// MetricsConfig holds the configuration for connecting to ClickHouse metrics database
 type MetricsConfig struct {
 	Host     string
 	Port     int
@@ -26,6 +27,7 @@ type MetricsConfig struct {
 	Password string
 }
 
+// DefaultMetricsConfig returns the default configuration for metrics using environment variables
 func DefaultMetricsConfig() MetricsConfig {
 	host := os.Getenv("CLICKHOUSE_HOST")
 	if host == "" {
@@ -47,6 +49,7 @@ func DefaultMetricsConfig() MetricsConfig {
 	}
 }
 
+// getEnvOrDefault returns the environment variable value or the default if not set
 func getEnvOrDefault(key, defaultVal string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
@@ -54,6 +57,7 @@ func getEnvOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
+// InitMetrics initializes the ClickHouse connection and creates the metrics table if needed
 func InitMetrics(config MetricsConfig) error {
 	metricsOnce.Do(func() {
 		addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
@@ -101,6 +105,7 @@ func InitMetrics(config MetricsConfig) error {
 	return metricsErr
 }
 
+// logMetric logs a metric entry to the ClickHouse database
 func logMetric(name string, duration time.Duration, count int, durationNs, bytesPerOp, allocsPerOp int64) {
 	if !metricsEnabled || metricsConn == nil {
 		return
@@ -127,6 +132,7 @@ func logMetric(name string, duration time.Duration, count int, durationNs, bytes
 	}
 }
 
+// MetricStage wraps a pipeline stage to record metrics about its execution
 func MetricStage[I, O any](name string, inner Stage[I, O]) Stage[I, O] {
 	return func(in <-chan I) <-chan O {
 		start := time.Now()
@@ -149,6 +155,7 @@ func MetricStage[I, O any](name string, inner Stage[I, O]) Stage[I, O] {
 	}
 }
 
+// init initializes the metrics system when the package is loaded
 func init() {
 	config := DefaultMetricsConfig()
 	log.Printf("Metrics config: %+v", config)
