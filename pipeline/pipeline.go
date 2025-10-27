@@ -197,29 +197,25 @@ func FlattenStage[T any]() Stage[[]T, T] {
 // ForEachStage applies the processor to each event in a batch.
 func ForEachStage[T, R any](processor Stage[T, R]) Stage[[]T, []R] {
 	return func(in <-chan []T) <-chan []R {
-		out := make(chan []R)
+		out := make(chan []R, 10)
 		go func() {
 			defer close(out)
 			for batch := range in {
-				results := make([]R, len(batch))
+				results := make([]R, 0, len(batch))
+				batchIn := make(chan T, len(batch))
+				batchOut := processor(batchIn)
 				var wg sync.WaitGroup
-				var mu sync.Mutex
-				for i, val := range batch {
-					wg.Add(1)
-					go func(idx int, v T) {
-						defer wg.Done()
-						singleIn := make(chan T, 1)
-						singleIn <- v
-						close(singleIn)
-						singleOut := processor(singleIn)
-						for result := range singleOut {
-							mu.Lock()
-							results[idx] = result
-							mu.Unlock()
-							break
-						}
-					}(i, val)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for r := range batchOut {
+						results = append(results, r)
+					}
+				}()
+				for _, val := range batch {
+					batchIn <- val
 				}
+				close(batchIn)
 				wg.Wait()
 				out <- results
 			}
