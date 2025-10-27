@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -18,6 +19,14 @@ var (
 	metricsEnabled bool
 )
 
+var (
+	defaultHost = getEnvOrDefault("CLICKHOUSE_HOST", "localhost")
+	defaultPort = getEnvAsIntOnly("CLICKHOUSE_PORT", 9000)
+	defaultDB   = getEnvOrDefault("CLICKHOUSE_DB", "default")
+	defaultUser = getEnvOrDefault("CLICKHOUSE_USER", "default")
+	defaultPass = getEnvOrDefault("CLICKHOUSE_PASSWORD", "default")
+)
+
 // MetricsConfig holds the configuration for connecting to ClickHouse metrics database
 type MetricsConfig struct {
 	Host     string
@@ -25,36 +34,6 @@ type MetricsConfig struct {
 	Database string
 	Username string
 	Password string
-}
-
-// DefaultMetricsConfig returns the default configuration for metrics using environment variables
-func DefaultMetricsConfig() MetricsConfig {
-	host := os.Getenv("CLICKHOUSE_HOST")
-	if host == "" {
-		host = "localhost"
-	}
-	port := 9000
-	if portEnv := os.Getenv("CLICKHOUSE_PORT"); portEnv != "" {
-		_, err := fmt.Sscanf(portEnv, "%d", &port)
-		if err != nil {
-			return MetricsConfig{}
-		}
-	}
-	return MetricsConfig{
-		Host:     host,
-		Port:     port,
-		Database: getEnvOrDefault("CLICKHOUSE_DB", "default"),
-		Username: getEnvOrDefault("CLICKHOUSE_USER", "default"),
-		Password: getEnvOrDefault("CLICKHOUSE_PASSWORD", "default"),
-	}
-}
-
-// getEnvOrDefault returns the environment variable value or the default if not set
-func getEnvOrDefault(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return defaultVal
 }
 
 // InitMetrics initializes the ClickHouse connection and creates the metrics table if needed
@@ -132,33 +111,56 @@ func logMetric(name string, duration time.Duration, count int, durationNs, bytes
 	}
 }
 
-// MetricStage wraps a pipeline stage to record metrics about its execution
+// MetricStage wraps a pipeline stage to record metrics about its execution.
+//
+// Example:
+//
+//	stage := MetricStage("double-stage", MapStage[int](func(x int) int { return x * 2 }))
+//	result := Collect(stage, []int{1, 2, 3})
 func MetricStage[I, O any](name string, inner Stage[I, O]) Stage[I, O] {
 	return func(in <-chan I) <-chan O {
+		var count int64
+		out := make(chan O, cap(in))
 		start := time.Now()
+
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
+		startAllocs := memStats.Mallocs
+		startBytes := memStats.TotalAlloc
+
 		innerOut := inner(in)
-		out := make(chan O, cap(innerOut))
-		var count int
-		var mu sync.Mutex
 		go func() {
 			defer close(out)
 			for val := range innerOut {
-				mu.Lock()
-				count++
-				mu.Unlock()
 				out <- val
+				atomic.AddInt64(&count, 1)
 			}
 			duration := time.Since(start)
-			logMetric(name, duration, count, 0, 0, 0)
+			runtime.ReadMemStats(&memStats)
+			finalCount := atomic.LoadInt64(&count)
+			if finalCount == 0 {
+				return
+			}
+			bytesPerOp := int64(memStats.TotalAlloc-startBytes) / finalCount
+			allocsPerOp := int64(memStats.Mallocs-startAllocs) / finalCount
+			go logMetric(name, duration, int(finalCount), duration.Nanoseconds()/finalCount, bytesPerOp, allocsPerOp)
 		}()
 		return out
 	}
 }
 
+var defaultMetricsConfig = MetricsConfig{
+	Host:     defaultHost,
+	Port:     defaultPort,
+	Database: defaultDB,
+	Username: defaultUser,
+	Password: defaultPass,
+}
+
 // init initializes the metrics system when the package is loaded
 func init() {
-	config := DefaultMetricsConfig()
-	log.Printf("Metrics config: %+v", config)
+	config := defaultMetricsConfig
+	log.Printf("Initializing metrics with ClickHouse at %s:%d", config.Host, config.Port)
 	if err := InitMetrics(config); err != nil {
 		log.Printf("Failed to initialize ClickHouse metrics: %v", err)
 	} else {
