@@ -1,75 +1,15 @@
 package pipeline
 
 import (
+	"os"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"testing"
-	"time"
 )
 
-type TestStruct struct {
-	ID      int
-	Name    string
-	Value   float64
-	Active  bool
-	Tags    []string
-	Data    map[string]int
-	Created time.Time
-	Updated time.Time
-	Score   int
-	Note    string
-}
-
-// generateInput creates a slice of TestStruct with n elements for testing
-func generateInput(n int) []TestStruct {
-	input := make([]TestStruct, n)
-	for i := 0; i < n; i++ {
-		input[i] = TestStruct{
-			ID:      i,
-			Name:    "test",
-			Value:   float64(i),
-			Active:  i%2 == 0,
-			Tags:    []string{"tag1", "tag2"},
-			Data:    map[string]int{"key": i},
-			Created: time.Now(),
-			Updated: time.Now(),
-			Score:   i * 10,
-			Note:    "note",
-		}
-	}
-	return input
-}
-
-// getDynamicConfig computes optimal number of workers and batch size based on input size
-func getDynamicConfig(inputSize int) (numWorkers, batchSize int) {
-	numWorkers = runtime.NumCPU()
-	if numWorkers < 1 {
-		numWorkers = 1
-	}
-
-	defaultBatchSize := 1000
-	if inputSize > 0 {
-		batchSize = inputSize / (numWorkers * 4)
-		if batchSize < 100 {
-			batchSize = 100
-		} else if batchSize > 10000 {
-			batchSize = 10000
-		}
-	} else {
-		batchSize = defaultBatchSize * numWorkers
-		if batchSize > 10000 {
-			batchSize = 10000
-		}
-	}
-	return numWorkers, batchSize
-}
-
-// fullPipeline builds a complex pipeline of stages for processing TestStruct elements
-func fullPipeline(inputSize int) Stage[TestStruct, TestStruct] {
-	numWorkers, batchSize := getDynamicConfig(inputSize)
-
+// testPipeline builds a complex pipeline of all the stages for processing TestStruct elements
+func testPipeline() Stage[TestStruct, TestStruct] {
 	mapStage := MapStage[TestStruct](func(ts TestStruct) TestStruct {
 		ts.ID++
 		return ts
@@ -87,35 +27,57 @@ func fullPipeline(inputSize int) Stage[TestStruct, TestStruct] {
 		}
 		return []TestStruct{ts}
 	})
-	thenStage := MapStage[TestStruct](func(ts TestStruct) TestStruct {
-		ts.Value *= 2
-		return ts
-	})
-	elseStage := MapStage[TestStruct](func(ts TestStruct) TestStruct {
-		ts.Value += 10
-		return ts
-	})
-	ifStage := IfStage[TestStruct, TestStruct](func(ts TestStruct) bool {
-		return ts.Value > 50
-	}, thenStage, elseStage)
-	return MetricStage("pipeline", Chain(
-		BatchStage[TestStruct](batchSize),
+	ifStage := IfStage[TestStruct, TestStruct](
+		func(ts TestStruct) bool { return ts.Value > 50 },
+		MapStage[TestStruct](func(ts TestStruct) TestStruct { ts.Value *= 2; return ts }),
+		MapStage[TestStruct](func(ts TestStruct) TestStruct { ts.Value += 10; return ts }),
+	)
+	processor := Chain(
+		Chain(mapStage, filterStage),
 		Chain(
-			FanOutStage[[]TestStruct, []TestStruct](
-				numWorkers,
-				ForEachStage[TestStruct, TestStruct](
-					Chain(
-						Chain(mapStage, filterStage),
-						Chain(
-							Chain(reduceStage, generateStage),
-							ifStage,
-						),
-					),
-				),
-			),
-			FlattenStage[TestStruct](),
+			Chain(reduceStage, generateStage),
+			ifStage,
 		),
-	))
+	)
+	return MetricStage("test_pipeline",
+		ParallelPipeline[TestStruct, TestStruct](processor, NumWorkers, BatchSize),
+	)
+}
+
+// mablePipeline builds a complex pipeline of all the stages for processing MableEvent elements
+func mablePipeline() Stage[MableEvent, MableEvent] {
+	mapStage := MapStage[MableEvent](func(me MableEvent) MableEvent {
+		me.TS++
+		return me
+	})
+	filterStage := FilterStage[MableEvent](func(me MableEvent) bool {
+		return me.EN == "Order Completed"
+	})
+	reduceStage := ReduceStage[MableEvent, MableEvent](func(me MableEvent) MableEvent {
+		me.PD.PHCT++
+		return me
+	})
+	generateStage := GenerateStage[MableEvent](func(me MableEvent) []MableEvent {
+		if me.TS%2 == 0 {
+			return []MableEvent{me, me}
+		}
+		return []MableEvent{me}
+	})
+	ifStage := IfStage[MableEvent, MableEvent](
+		func(me MableEvent) bool { return me.PD.PP > 50 },
+		MapStage[MableEvent](func(me MableEvent) MableEvent { me.PD.PP *= 2; return me }),
+		MapStage[MableEvent](func(me MableEvent) MableEvent { me.PD.PP += 10; return me }),
+	)
+	processor := Chain(
+		Chain(mapStage, filterStage),
+		Chain(
+			Chain(reduceStage, generateStage),
+			ifStage,
+		),
+	)
+	return MetricStage("mable_pipeline",
+		ParallelPipeline[MableEvent, MableEvent](processor, NumWorkers, BatchSize),
+	)
 }
 
 // Tests MapStage with integer multiplication
@@ -312,100 +274,181 @@ func TestFlattenStageEmptyInput(t *testing.T) {
 	}
 }
 
-// Tests DefaultMetricsConfig with environment variables
-func TestDefaultMetricsConfig(t *testing.T) {
-	t.Setenv("CLICKHOUSE_HOST", "test-host")
-	t.Setenv("CLICKHOUSE_PORT", "1234")
-	t.Setenv("CLICKHOUSE_DB", "test-db")
-	t.Setenv("CLICKHOUSE_USER", "test-user")
-	t.Setenv("CLICKHOUSE_PASSWORD", "test-pass")
-	config := DefaultMetricsConfig()
-	expected := MetricsConfig{
-		Host:     "test-host",
-		Port:     1234,
-		Database: "test-db",
-		Username: "test-user",
-		Password: "test-pass",
+// Tests generateTestInput
+func TestGenerateTestInput(t *testing.T) {
+	input := generateTestInput(2)
+	if len(input) != 2 {
+		t.Errorf("expected length 2, got %d", len(input))
 	}
-	if !reflect.DeepEqual(config, expected) {
-		t.Errorf("expected %v, got %v", expected, config)
+	if input[0].ID != 0 || input[1].ID != 1 {
+		t.Errorf("expected IDs 0,1, got %d,%d", input[0].ID, input[1].ID)
 	}
 }
 
-// Tests DefaultMetricsConfig with default values
-func TestDefaultMetricsConfigDefaults(t *testing.T) {
-	t.Setenv("CLICKHOUSE_HOST", "")
-	t.Setenv("CLICKHOUSE_PORT", "")
-	t.Setenv("CLICKHOUSE_DB", "")
-	t.Setenv("CLICKHOUSE_USER", "")
-	t.Setenv("CLICKHOUSE_PASSWORD", "")
-	config := DefaultMetricsConfig()
-	expected := MetricsConfig{
-		Host:     "localhost",
-		Port:     9000,
-		Database: "default",
-		Username: "default",
-		Password: "default",
+// Tests generateMableInput
+func TestGenerateMableInput(t *testing.T) {
+	input := generateMableInput(2)
+	if len(input) != 2 {
+		t.Errorf("expected length 2, got %d", len(input))
 	}
-	if !reflect.DeepEqual(config, expected) {
-		t.Errorf("expected %v, got %v", expected, config)
+	if input[0].EID != "0197a599-ef42-7bb8-99e7-70e57cef4627-0" || input[1].EID != "0197a599-ef42-7bb8-99e7-70e57cef4627-1" {
+		t.Errorf("expected specific EIDs, got %s, %s", input[0].EID, input[1].EID)
 	}
 }
 
-// BenchmarkFullPipeline10 benchmarks the full pipeline with 10 events
-func BenchmarkFullPipeline10(b *testing.B) {
-	benchmarkFullPipeline(b, 10)
+// Tests loadMableEventSample
+func TestLoadMableEventSample(t *testing.T) {
+	event, err := loadMableEventSample()
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if event.EID != "0197a599-ef42-7bb8-99e7-70e57cef4627" {
+		t.Errorf("expected specific EID, got %s", event.EID)
+	}
 }
 
-// BenchmarkFullPipeline100 benchmarks the full pipeline with 100 events
-func BenchmarkFullPipeline100(b *testing.B) {
-	benchmarkFullPipeline(b, 100)
+// Tests ParseMableEventJSON with valid JSON
+func TestParseMableEventJSON(t *testing.T) {
+	data := []byte(`{"eid":"test","en":"test_event","ts":123}`)
+	event, err := ParseMableEventJSON(data)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if event.EID != "test" {
+		t.Errorf("expected EID test, got %s", event.EID)
+	}
 }
 
-// BenchmarkFullPipeline1000 benchmarks the full pipeline with 10,000 events
-func BenchmarkFullPipeline1000(b *testing.B) {
-	benchmarkFullPipeline(b, 10000)
+// Tests ParseMableEventJSON with invalid JSON
+func TestParseMableEventJSONInvalid(t *testing.T) {
+	data := []byte(`invalid json`)
+	_, err := ParseMableEventJSON(data)
+	if err == nil {
+		t.Errorf("expected error, got nil")
+
+	}
 }
 
-// BenchmarkFullPipeline100000 benchmarks the full pipeline with 100,000 events
-func BenchmarkFullPipeline100000(b *testing.B) {
-	benchmarkFullPipeline(b, 100000)
+// Tests MustGetEnvAsInt with valid env
+func TestMustGetEnvAsInt(t *testing.T) {
+	os.Setenv("TEST_INT", "42")
+	defer os.Unsetenv("TEST_INT")
+	val := getEnvAsIntOnly("TEST_INT", 10)
+	if val != 42 {
+		t.Errorf("expected 42, got %d", val)
+	}
 }
 
-// BenchmarkFullPipeline1000000 benchmarks the full pipeline with 1,000,000 events
-func BenchmarkFullPipeline1000000(b *testing.B) {
-	benchmarkFullPipeline(b, 1000000)
+// Tests MustGetEnvAsInt with invalid env value
+func TestMustGetEnvAsIntInvalid(t *testing.T) {
+	os.Setenv("TEST_INT_INVALID", "notanumber")
+	defer os.Unsetenv("TEST_INT_INVALID")
+	val := getEnvAsIntOnly("TEST_INT_INVALID", 10)
+	if val != 10 {
+		t.Errorf("expected 10, got %d", val)
+	}
 }
 
-// BenchmarkFullPipeline10000000 benchmarks the full pipeline with 10,000,000 events
-func BenchmarkFullPipeline10000000(b *testing.B) {
-	benchmarkFullPipeline(b, 10000000)
+// Tests MustGetEnvAsInt when not set
+func TestMustGetEnvAsIntNotSet(t *testing.T) {
+	val := getEnvAsIntOnly("NOT_SET", 10)
+	if val != 10 {
+		t.Errorf("expected 10, got %d", val)
+	}
 }
 
-// benchmarkFullPipeline runs the full pipeline n times and logs performance metrics
-func benchmarkFullPipeline(b *testing.B, n int) {
-	input := generateInput(n)
-	stage := fullPipeline(n)
-	b.ReportAllocs()
-	b.ResetTimer()
+// Tests getEnvOrDefault when set
+func TestGetEnvOrDefaultSet(t *testing.T) {
+	os.Setenv("TEST_STR", "value")
+	defer os.Unsetenv("TEST_STR")
+	val := getEnvOrDefault("TEST_STR", "default")
+	if val != "value" {
+		t.Errorf("expected value, got %s", val)
+	}
+}
 
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-	startAllocs := memStats.Mallocs
-	startBytes := memStats.TotalAlloc
+// Tests getEnvOrDefault when not set
+func TestGetEnvOrDefaultNotSet(t *testing.T) {
+	val := getEnvOrDefault("NOT_SET", "default")
+	if val != "default" {
+		t.Errorf("expected default, got %s", val)
+	}
+}
 
+// BenchmarkTestPipeline10 benchmarks the test pipeline with 10 events
+func BenchmarkTestPipeline10(b *testing.B) {
+	benchmarkTestPipeline(b, 10)
+}
+
+// BenchmarkTestPipeline100 benchmarks the test pipeline with 100 events
+func BenchmarkTestPipeline100(b *testing.B) {
+	benchmarkTestPipeline(b, 100)
+}
+
+// BenchmarkTestPipeline10000 benchmarks the test pipeline with 10,000 events
+func BenchmarkTestPipeline10000(b *testing.B) {
+	benchmarkTestPipeline(b, 10000)
+}
+
+// BenchmarkTestPipeline100000 benchmarks the test pipeline with 100,000 events
+func BenchmarkTestPipeline100000(b *testing.B) {
+	benchmarkTestPipeline(b, 100000)
+}
+
+// BenchmarkTestPipeline1000000 benchmarks the test pipeline with 1,000,000 events
+func BenchmarkTestPipeline1000000(b *testing.B) {
+	benchmarkTestPipeline(b, 1000000)
+}
+
+// BenchmarkTestPipeline10000000 benchmarks the test pipeline with 10,000,000 events
+func BenchmarkTestPipeline10000000(b *testing.B) {
+	benchmarkTestPipeline(b, 10000000)
+}
+
+// benchmarkTestPipeline runs the test pipeline n times and logs performance metrics
+func benchmarkTestPipeline(b *testing.B, n int) {
+	input := generateTestInput(n)
+	stage := testPipeline()
 	for i := 0; i < b.N; i++ {
 		_ = Collect[TestStruct, TestStruct](stage, input)
 	}
+}
 
-	b.StopTimer()
-	runtime.ReadMemStats(&memStats)
-	logMetric(
-		b.Name(),
-		b.Elapsed()/time.Duration(b.N),
-		n,
-		b.Elapsed().Nanoseconds()/int64(b.N),
-		int64(memStats.TotalAlloc-startBytes)/int64(b.N),
-		int64(memStats.Mallocs-startAllocs)/int64(b.N),
-	)
+// BenchmarkMablePipeline10 benchmarks the optimized Mable pipeline with 10 events
+func BenchmarkMablePipeline10(b *testing.B) {
+	benchmarkMablePipeline(b, 10)
+}
+
+// BenchmarkMablePipeline100 benchmarks the optimized Mable pipeline with 100 events
+func BenchmarkMablePipeline100(b *testing.B) {
+	benchmarkMablePipeline(b, 100)
+}
+
+// BenchmarkMablePipeline10000 benchmarks the optimized Mable pipeline with 10,000 events
+func BenchmarkMablePipeline10000(b *testing.B) {
+	benchmarkMablePipeline(b, 10000)
+}
+
+// BenchmarkMablePipeline100000 benchmarks the optimized Mable pipeline with 100,000 events
+func BenchmarkMablePipeline100000(b *testing.B) {
+	benchmarkMablePipeline(b, 100000)
+}
+
+// BenchmarkMablePipeline1000000 benchmarks the optimized Mable pipeline with 1,000,000 events
+func BenchmarkMablePipeline1000000(b *testing.B) {
+	benchmarkMablePipeline(b, 1000000)
+}
+
+// BenchmarkMablePipeline10000000 benchmarks the optimized Mable pipeline with 10,000,000 events
+func BenchmarkMablePipeline10000000(b *testing.B) {
+	benchmarkMablePipeline(b, 10000000)
+}
+
+// benchmarkMablePipeline runs the optimized Mable pipeline n times and logs performance metrics
+func benchmarkMablePipeline(b *testing.B, n int) {
+	input := generateMableInput(n)
+	stage := mablePipeline()
+	for i := 0; i < b.N; i++ {
+		_ = Collect[MableEvent, MableEvent](stage, input)
+	}
 }
