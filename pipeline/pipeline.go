@@ -120,11 +120,11 @@ func IfStage[T, U any](cond func(T) bool, thenStage, elseStage Stage[T, U]) Stag
 // FanOutStage fans out input to multiple workers, each running a copy of the worker stage, and merges outputs.
 func FanOutStage[I, O any](numWorkers int, worker Stage[I, O]) Stage[I, O] {
 	return func(in <-chan I) <-chan O {
-		out := make(chan O)
+		out := make(chan O, numWorkers*10)
 		var ins []chan I
 		var outs []<-chan O
 		for i := 0; i < numWorkers; i++ {
-			inCh := make(chan I)
+			inCh := make(chan I, numWorkers*10)
 			ins = append(ins, inCh)
 			outs = append(outs, worker(inCh))
 		}
@@ -162,12 +162,12 @@ func BatchStage[T any](batchSize int) Stage[T, []T] {
 		out := make(chan []T)
 		go func() {
 			defer close(out)
-			var batch []T
+			var batch = make([]T, 0, batchSize)
 			for val := range in {
 				batch = append(batch, val)
 				if len(batch) == batchSize {
 					out <- batch
-					batch = nil
+					batch = make([]T, 0, batchSize)
 				}
 			}
 			if len(batch) > 0 {
@@ -247,7 +247,7 @@ func ParallelPipeline[T, R any](processor Stage[T, R], numWorkers int, batchSize
 
 // Collect runs the stage on an input slice and collects the output into a slice (sink).
 func Collect[I, O any](stage Stage[I, O], input []I) []O {
-	in := make(chan I)
+	in := make(chan I, len(input)/10)
 	go func() {
 		for _, v := range input {
 			in <- v
@@ -255,7 +255,7 @@ func Collect[I, O any](stage Stage[I, O], input []I) []O {
 		close(in)
 	}()
 	out := stage(in)
-	var result []O
+	result := make([]O, 0, len(input))
 	for v := range out {
 		result = append(result, v)
 	}
