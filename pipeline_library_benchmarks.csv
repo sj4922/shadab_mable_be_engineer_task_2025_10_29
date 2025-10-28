@@ -1,0 +1,13 @@
+Pipeline,Event Count,Time Taken (ms),Memory Used (MB)
+TestPipeline,10,0.1221,0.03
+TestPipeline,100,0.1317,0.07
+TestPipeline,10000,6.2957,5.62
+TestPipeline,100000,33.7036,54.02
+TestPipeline,1000000,312.6857,538.96
+TestPipeline,10000000,3496.3363,5389.58
+MablePipeline,10,0.1467,0.02
+MablePipeline,100,0.1382,0.14
+MablePipeline,10000,7.2403,13.38
+MablePipeline,100000,43.3168,132.87
+MablePipeline,1000000,437.5403,1327.51
+MablePipeline,10000000,10356.739,13273.96
