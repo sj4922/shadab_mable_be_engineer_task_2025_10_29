@@ -22,3 +22,8 @@ func getEnvOrDefault(key, defaultVal string) string {
 	}
 	return defaultVal
 }
+
+// ptrOf returns a pointer to the given value
+func ptrOf[T any](v T) *T {
+	return &v
+}

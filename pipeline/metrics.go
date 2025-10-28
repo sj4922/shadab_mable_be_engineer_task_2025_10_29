@@ -89,8 +89,12 @@ func InitMetrics(config MetricsConfig) error {
 	return metricsErr
 }
 
-// logMetric logs a metric entry to the ClickHouse database
-func logMetric(name string, count int64, duration float64, memory int64) {
+// LogMetric logs a metric entry to the ClickHouse database
+//
+// Example:
+//
+//	LogMetric("double-stage", 1000, 1.23, 2048)
+func LogMetric(name string, count int64, duration float64, memory int64) {
 	if !metricsEnabled || metricsConn == nil {
 		return
 	}
@@ -138,7 +142,7 @@ func MetricStage[I, O any](name string, inner Stage[I, O]) Stage[I, O] {
 			if duration == 0 {
 				return
 			}
-			logMetric(
+			LogMetric(
 				name,
 				count,
 				duration.Seconds(),

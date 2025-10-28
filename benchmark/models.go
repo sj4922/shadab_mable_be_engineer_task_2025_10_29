@@ -1,10 +1,8 @@
-package pipeline
+package main
 
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"strconv"
 	"time"
 )
 
@@ -121,73 +119,6 @@ type SessionData struct {
 	SCT       int                    `json:"sct"`
 	SID       string                 `json:"sid"`
 	SSTS      int64                  `json:"ssts"`
-}
-
-// generateTestInput creates a slice of TestStruct with n elements for testing
-func generateTestInput(n int) []TestStruct {
-	input := make([]TestStruct, n)
-	for i := 0; i < n; i++ {
-		input[i] = TestStruct{
-			ID:      i,
-			Name:    "test",
-			Value:   float64(i),
-			Active:  i%2 == 0,
-			Tags:    []string{"tag1", "tag2"},
-			Data:    map[string]int{"key": i},
-			Created: time.Now(),
-			Updated: time.Now(),
-			Score:   i * 10,
-			Note:    "note",
-		}
-	}
-	return input
-}
-
-// Cache for the base MableEvent to avoid repeated JSON parsing during benchmarks
-var cachedBaseMableEvent *MableEvent
-
-// getBaseMableEvent loads and caches the base MableEvent from the sample JSON file
-func getBaseMableEvent() *MableEvent {
-	if cachedBaseMableEvent == nil {
-		data, err := loadMableEventSample()
-		if err != nil {
-			panic(fmt.Sprintf("Failed to load MableEvent sample: %v", err))
-		}
-		cachedBaseMableEvent = data
-	}
-	return cachedBaseMableEvent
-}
-
-// generateMableInput creates a slice of MableEvent with n elements based on the sample event with small modifications
-func generateMableInput(n int) []MableEvent {
-	baseEvent := getBaseMableEvent()
-
-	input := make([]MableEvent, n)
-
-	baseEID := baseEvent.EID
-	baseTS := baseEvent.TS
-
-	for i := 0; i < n; i++ {
-		input[i] = *baseEvent
-		input[i].EID = baseEID + "-" + strconv.Itoa(i)
-		input[i].TS = baseTS + int64(i)
-	}
-	return input
-}
-
-// loadMableEventSample reads the sample JSON file and parses it into a MableEvent
-func loadMableEventSample() (*MableEvent, error) {
-	data, err := os.ReadFile("../benchmark/mable_event_sample.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read mable_event_sample.json: %w", err)
-	}
-
-	var event MableEvent
-	if err := json.Unmarshal(data, &event); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal MableEvent JSON: %w", err)
-	}
-
-	return &event, nil
 }
 
 // ParseMableEventJSON parses a JSON byte slice into a MableEvent
