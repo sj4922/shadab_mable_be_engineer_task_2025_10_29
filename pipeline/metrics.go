@@ -6,7 +6,6 @@ import (
 	"log"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -36,6 +35,14 @@ type MetricsConfig struct {
 	Password string
 }
 
+var defaultMetricsConfig = MetricsConfig{
+	Host:     defaultHost,
+	Port:     defaultPort,
+	Database: defaultDB,
+	Username: defaultUser,
+	Password: defaultPass,
+}
+
 // InitMetrics initializes the ClickHouse connection and creates the metrics table if needed
 func InitMetrics(config MetricsConfig) error {
 	metricsOnce.Do(func() {
@@ -63,12 +70,10 @@ func InitMetrics(config MetricsConfig) error {
 		createTableSQL := `
             CREATE TABLE IF NOT EXISTS metrics (
                 stage String,
+                count Int64,
                 duration Float64,
-                count UInt64,
-                timestamp DateTime,
-                duration_ns Int64,
-                bytes_per_op Int64,
-                allocs_per_op Int64
+                memory Int64,
+                timestamp DateTime
             ) ENGINE = MergeTree()
             ORDER BY (stage, count, timestamp)
         `
@@ -85,7 +90,7 @@ func InitMetrics(config MetricsConfig) error {
 }
 
 // logMetric logs a metric entry to the ClickHouse database
-func logMetric(name string, duration time.Duration, count int, durationNs, bytesPerOp, allocsPerOp int64) {
+func logMetric(name string, count int64, duration float64, memory int64) {
 	if !metricsEnabled || metricsConn == nil {
 		return
 	}
@@ -95,15 +100,13 @@ func logMetric(name string, duration time.Duration, count int, durationNs, bytes
 
 	err := metricsConn.Exec(ctx,
 		`INSERT INTO metrics 
-        (stage, duration, count, timestamp, duration_ns, bytes_per_op, allocs_per_op) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        (stage, count, duration, memory, timestamp) 
+        VALUES (?, ?, ?, ?, ?)`,
 		name,
-		duration.Seconds(),
 		count,
+		duration,
+		memory,
 		time.Now(),
-		durationNs,
-		bytesPerOp,
-		allocsPerOp,
 	)
 
 	if err != nil {
@@ -119,42 +122,31 @@ func logMetric(name string, duration time.Duration, count int, durationNs, bytes
 //	result := Collect(stage, []int{1, 2, 3})
 func MetricStage[I, O any](name string, inner Stage[I, O]) Stage[I, O] {
 	return func(in <-chan I) <-chan O {
-		var count int64
-		out := make(chan O, cap(in))
-		start := time.Now()
-
-		var memStats runtime.MemStats
-		runtime.ReadMemStats(&memStats)
-		startAllocs := memStats.Mallocs
-		startBytes := memStats.TotalAlloc
-
-		innerOut := inner(in)
+		out := make(chan O, max(1, cap(in)))
 		go func() {
 			defer close(out)
-			for val := range innerOut {
-				out <- val
-				atomic.AddInt64(&count, 1)
+			var memStart, memEnd runtime.MemStats
+			runtime.ReadMemStats(&memStart)
+			start := time.Now()
+			count := int64(0)
+			for v := range inner(in) {
+				count++
+				out <- v
 			}
+			runtime.ReadMemStats(&memEnd)
 			duration := time.Since(start)
-			runtime.ReadMemStats(&memStats)
-			finalCount := atomic.LoadInt64(&count)
-			if finalCount == 0 {
+			if duration == 0 {
 				return
 			}
-			bytesPerOp := int64(memStats.TotalAlloc-startBytes) / finalCount
-			allocsPerOp := int64(memStats.Mallocs-startAllocs) / finalCount
-			go logMetric(name, duration, int(finalCount), duration.Nanoseconds()/finalCount, bytesPerOp, allocsPerOp)
+			logMetric(
+				name,
+				count,
+				duration.Seconds(),
+				int64(memEnd.HeapInuse-memStart.HeapInuse),
+			)
 		}()
 		return out
 	}
-}
-
-var defaultMetricsConfig = MetricsConfig{
-	Host:     defaultHost,
-	Port:     defaultPort,
-	Database: defaultDB,
-	Username: defaultUser,
-	Password: defaultPass,
 }
 
 // init initializes the metrics system when the package is loaded
