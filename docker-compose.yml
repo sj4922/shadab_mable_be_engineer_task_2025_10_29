@@ -1,4 +1,5 @@
 version: '3.8'
+
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -26,6 +27,30 @@ services:
       - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
     volumes:
       - grafana_data:/var/lib/grafana
+    depends_on:
+      - clickhouse
+
+  benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/app/data
+      - .:/workspace
+    environment:
+      - PIPELINE_NUM_WORKERS=${PIPELINE_NUM_WORKERS:-4}
+      - PIPELINE_BATCH_SIZE=${PIPELINE_BATCH_SIZE:-100}
+      - PIPELINE_CHANNEL_BUF_SIZE=${PIPELINE_CHANNEL_BUF_SIZE:-10}
+      - PIPELINE_COLLECT_MIN_BUF=${PIPELINE_COLLECT_MIN_BUF:-10}
+      - PIPELINE_COLLECT_MAX_BUF=${PIPELINE_COLLECT_MAX_BUF:-500}
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=default
+    stdin_open: true
+    tty: true
+    command: ["./benchmark"]
     depends_on:
       - clickhouse
 

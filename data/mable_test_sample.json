@@ -1,0 +1,26 @@
+[
+  {
+    "ID": 0,
+    "Name": "test",
+    "Value": 0.0,
+    "Active": true,
+    "Tags": ["tag1", "tag2"],
+    "Data": {"key": 0},
+    "Created": "2025-10-29T07:38:11.000Z",
+    "Updated": "2025-10-29T07:38:11.000Z",
+    "Score": 0,
+    "Note": "note"
+  },
+  {
+    "ID": 1,
+    "Name": "test",
+    "Value": 1.0,
+    "Active": false,
+    "Tags": ["tag1", "tag2"],
+    "Data": {"key": 1},
+    "Created": "2025-10-29T07:38:11.000Z",
+    "Updated": "2025-10-29T07:38:11.000Z",
+    "Score": 10,
+    "Note": "note"
+  }
+]

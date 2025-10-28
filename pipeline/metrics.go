@@ -159,7 +159,5 @@ func init() {
 	log.Printf("Initializing metrics with ClickHouse at %s:%d", config.Host, config.Port)
 	if err := InitMetrics(config); err != nil {
 		log.Printf("Failed to initialize ClickHouse metrics: %v", err)
-	} else {
-		log.Println("Metrics system initialized successfully")
 	}
 }

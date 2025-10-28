@@ -129,3 +129,40 @@ func ParseMableEventJSON(data []byte) (*MableEvent, error) {
 	}
 	return &event, nil
 }
+
+// generateTestInput generates test input for TestStruct
+func generateTestInput(n int) []*TestStruct {
+	input := make([]*TestStruct, n)
+	for i := 0; i < n; i++ {
+		input[i] = &TestStruct{
+			ID:      i,
+			Name:    fmt.Sprintf("Test %d", i),
+			Value:   float64(i) * 1.5,
+			Active:  i%2 == 0,
+			Tags:    []string{"tag1", "tag2"},
+			Data:    map[string]int{"key": i},
+			Created: time.Now(),
+			Updated: time.Now(),
+			Score:   i,
+			Note:    "",
+		}
+	}
+	return input
+}
+
+// generateMableInput generates test input for MableEvent
+func generateMableInput(n int) []*MableEvent {
+	input := make([]*MableEvent, n)
+	for i := 0; i < n; i++ {
+	input[i] = &MableEvent{
+		EID: fmt.Sprintf("0197a599-ef42-7bb8-99e7-70e57cef4627-%d", i),
+		EN:  "Order Completed",
+		TS:  int64(i + 1000000),
+		PD: PageData{
+			PP:   float64(i) * 10.0,
+			PHCT: 0,
+		},
+	}
+	}
+	return input
+}
