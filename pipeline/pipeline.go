@@ -1,16 +1,90 @@
-// Package pipeline provides a composable, concurrent pipeline framework using channels and goroutines.
-// It defines a Stage as a function transforming an input channel to an output channel, enabling
-// the construction of complex data processing pipelines with parallelism and concurrency control.
+// Package pipeline provides a generic streaming pipeline with stage composition,
+// parallel processing, and fan-out/fan-in patterns.
 //
-// Example usage:
+// # Usage Examples
 //
-//	stage := Chain(
-//	  MapStage[int](func(x int) int { return x * 2 }),
-//	  FilterStage[int](func(x int) bool { return x > 5 }),
-//	)
-//	input := []int{1, 2, 3, 4, 5, 6}
-//	result := Collect(stage, input)
-//	fmt.Println(result) // Output: [6 8 10 12]
+// ## Basic Stage Composition
+//
+//	type MyEvent struct {
+//	    ID    int
+//	    Value float64
+//	    Name  string
+//	}
+//
+//	// Create a simple transformation pipeline
+//	mapStage := MapStage(func(e *MyEvent) *MyEvent {
+//	    e.Value *= 2
+//	    return e
+//	})
+//
+//	filterStage := FilterStage(func(e *MyEvent) bool {
+//	    return e.Value > 10
+//	})
+//
+//	// Chain stages together
+//	pipeline := Chain(mapStage, filterStage)
+//
+//	// Process events
+//	events := []*MyEvent{
+//	    {ID: 1, Value: 5.0, Name: "event1"},
+//	    {ID: 2, Value: 15.0, Name: "event2"},
+//	}
+//
+//	result := Collect(pipeline, events)
+//	// result: [{ID: 2, Value: 30.0, Name: "event2"}]
+//
+// ## Conditional Routing
+//
+//	ifStage := IfStage(func(e *MyEvent) bool {
+//	    return e.Value > 100
+//	},
+//	// High value processing
+//	MapStage(func(e *MyEvent) *MyEvent {
+//	    e.Name = "HIGH_" + e.Name
+//	    return e
+//	}),
+//	// Normal value processing
+//	MapStage(func(e *MyEvent) *MyEvent {
+//	    e.Name = "NORMAL_" + e.Name
+//	    return e
+//	}))
+//
+// ## Parallel Processing
+//
+//	// CPU-intensive stage
+//	heavyProcessor := MapStage(func(e *MyEvent) *MyEvent {
+//	    // Simulate CPU-intensive work
+//	    time.Sleep(10 * time.Millisecond)
+//	    e.Value = math.Sqrt(e.Value)
+//	    return e
+//	})
+//
+//	// Create parallel pipeline with 8 workers, batch size 50
+//	parallelPipeline := ParallelPipeline(heavyProcessor, 8, 50)
+//
+//	result := Collect(parallelPipeline, events)
+//
+// ## Complex Pipeline Construction
+//
+//	processData := func(data []*MyEvent) []*ProcessedEvent {
+//	    pipeline := Chain(
+//	        MapStage(func(e *MyEvent) *MyEvent {
+//	            e.Value = math.Log(e.Value + 1)
+//	            return e
+//	        }),
+//	        FilterStage(func(e *MyEvent) bool {
+//	            return e.Value > 0.5
+//	        }),
+//	        ReduceStage(func(e *MyEvent) *ProcessedEvent {
+//	            return &ProcessedEvent{
+//	                ID:    e.ID,
+//	                Score: int(e.Value * 100),
+//	            }
+//	        }),
+//	    )
+//
+//	    return Collect(pipeline, data)
+//	}
 package pipeline
 
 import (
@@ -27,16 +101,16 @@ var (
 )
 
 // Stage is the core interface for a pipeline stage. It takes an input channel and returns an output channel, spawning goroutines as needed.
-type Stage[I, O any] func(in <-chan I) <-chan O
+type Stage[I, O any] func(<-chan I) <-chan O
 
 // MapStage applies a mapping function to each event.
-func MapStage[T any](f func(T) T) Stage[T, T] {
-	return func(in <-chan T) <-chan T {
-		out := make(chan T, ChannelBufSize)
+func MapStage[T any](f func(*T) *T) Stage[*T, *T] {
+	return func(in <-chan *T) <-chan *T {
+		out := make(chan *T, ChannelBufSize)
 		go func() {
 			defer close(out)
-			for val := range in {
-				out <- f(val)
+			for v := range in {
+				out <- f(v)
 			}
 		}()
 		return out
@@ -44,14 +118,14 @@ func MapStage[T any](f func(T) T) Stage[T, T] {
 }
 
 // FilterStage filters events based on a predicate.
-func FilterStage[T any](f func(T) bool) Stage[T, T] {
-	return func(in <-chan T) <-chan T {
-		out := make(chan T, ChannelBufSize)
+func FilterStage[T any](f func(*T) bool) Stage[*T, *T] {
+	return func(in <-chan *T) <-chan *T {
+		out := make(chan *T, ChannelBufSize)
 		go func() {
 			defer close(out)
-			for val := range in {
-				if f(val) {
-					out <- val
+			for v := range in {
+				if f(v) {
+					out <- v
 				}
 			}
 		}()
@@ -60,28 +134,28 @@ func FilterStage[T any](f func(T) bool) Stage[T, T] {
 }
 
 // ReduceStage transforms each event from T to R.
-func ReduceStage[T, R any](f func(T) R) Stage[T, R] {
-	return func(in <-chan T) <-chan R {
-		out := make(chan R, ChannelBufSize)
+func ReduceStage[T, R any](f func(*T) *R) Stage[*T, *R] {
+	return func(in <-chan *T) <-chan *R {
+		out := make(chan *R, ChannelBufSize)
 		go func() {
 			defer close(out)
-			for val := range in {
-				out <- f(val)
+			for v := range in {
+				out <- f(v)
 			}
 		}()
 		return out
 	}
 }
 
-// GenerateStage generates additional events from each input event, including the original.
-func GenerateStage[T any](f func(T) []T) Stage[T, T] {
-	return func(in <-chan T) <-chan T {
-		out := make(chan T, ChannelBufSize)
+// GenerateStage generates additional events from each input event.
+func GenerateStage[T any](f func(*T) []*T) Stage[*T, *T] {
+	return func(in <-chan *T) <-chan *T {
+		out := make(chan *T, ChannelBufSize)
 		go func() {
 			defer close(out)
-			for val := range in {
-				for _, newVal := range f(val) {
-					out <- newVal
+			for v := range in {
+				for _, nv := range f(v) {
+					out <- nv
 				}
 			}
 		}()
@@ -89,27 +163,26 @@ func GenerateStage[T any](f func(T) []T) Stage[T, T] {
 	}
 }
 
-// IfStage routes events to one of two sub-pipelines based on a condition. Sub-pipelines must have the same output type.
-func IfStage[T, U any](cond func(T) bool, thenStage, elseStage Stage[T, U]) Stage[T, U] {
-	return func(in <-chan T) <-chan U {
-		out := make(chan U)
-		thenIn := make(chan T)
-		elseIn := make(chan T)
+// IfStage routes events to one of two sub-pipelines of the same type based on a condition.
+func IfStage[T, U any](cond func(*T) bool, thenStage, elseStage Stage[*T, *U]) Stage[*T, *U] {
+	return func(in <-chan *T) <-chan *U {
+		out := make(chan *U, ChannelBufSize)
+		thenIn := make(chan *T, ChannelBufSize)
+		elseIn := make(chan *T, ChannelBufSize)
 		thenOut := thenStage(thenIn)
 		elseOut := elseStage(elseIn)
 		var wg sync.WaitGroup
-		wg.Add(1)
+		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			for val := range thenOut {
-				out <- val
+			for v := range thenOut {
+				out <- v
 			}
 		}()
-		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for val := range elseOut {
-				out <- val
+			for v := range elseOut {
+				out <- v
 			}
 		}()
 		go func() {
@@ -117,11 +190,11 @@ func IfStage[T, U any](cond func(T) bool, thenStage, elseStage Stage[T, U]) Stag
 			close(out)
 		}()
 		go func() {
-			for val := range in {
-				if cond(val) {
-					thenIn <- val
+			for v := range in {
+				if cond(v) {
+					thenIn <- v
 				} else {
-					elseIn <- val
+					elseIn <- v
 				}
 			}
 			close(thenIn)
@@ -131,26 +204,26 @@ func IfStage[T, U any](cond func(T) bool, thenStage, elseStage Stage[T, U]) Stag
 	}
 }
 
-// FanOutStage fans out input to multiple workers, each running a copy of the worker stage, and merges outputs.
+// FanOutStage fans out input to multiple workers and merges outputs.
 func FanOutStage[I, O any](numWorkers int, worker Stage[I, O]) Stage[I, O] {
 	return func(in <-chan I) <-chan O {
 		out := make(chan O, numWorkers*ChannelBufSize)
 		var ins []chan I
 		var outs []<-chan O
 		for i := 0; i < numWorkers; i++ {
-			inCh := make(chan I, numWorkers*ChannelBufSize)
+			inCh := make(chan I, ChannelBufSize)
 			ins = append(ins, inCh)
 			outs = append(outs, worker(inCh))
 		}
 		var wg sync.WaitGroup
-		for _, o := range outs {
+		for _, ch := range outs {
 			wg.Add(1)
-			go func(ch <-chan O) {
+			go func(c <-chan O) {
 				defer wg.Done()
-				for val := range ch {
-					out <- val
+				for v := range c {
+					out <- v
 				}
-			}(o)
+			}(ch)
 		}
 		go func() {
 			wg.Wait()
@@ -158,12 +231,12 @@ func FanOutStage[I, O any](numWorkers int, worker Stage[I, O]) Stage[I, O] {
 		}()
 		go func() {
 			i := 0
-			for val := range in {
-				ins[i] <- val
-				i = (i + 1) % numWorkers
+			for v := range in {
+				ins[i] <- v
+				i = (i + 1) % len(ins)
 			}
-			for _, inCh := range ins {
-				close(inCh)
+			for _, c := range ins {
+				close(c)
 			}
 		}()
 		return out
@@ -171,17 +244,17 @@ func FanOutStage[I, O any](numWorkers int, worker Stage[I, O]) Stage[I, O] {
 }
 
 // BatchStage batches input events into slices of size batchSize.
-func BatchStage[T any](batchSize int) Stage[T, []T] {
-	return func(in <-chan T) <-chan []T {
-		out := make(chan []T, ChannelBufSize)
+func BatchStage[T any](batchSize int) Stage[*T, []*T] {
+	return func(in <-chan *T) <-chan []*T {
+		out := make(chan []*T, ChannelBufSize)
 		go func() {
 			defer close(out)
-			var batch = make([]T, 0, batchSize)
-			for val := range in {
-				batch = append(batch, val)
+			batch := make([]*T, 0, batchSize)
+			for v := range in {
+				batch = append(batch, v)
 				if len(batch) == batchSize {
 					out <- batch
-					batch = make([]T, 0, batchSize)
+					batch = make([]*T, 0, batchSize)
 				}
 			}
 			if len(batch) > 0 {
@@ -193,14 +266,14 @@ func BatchStage[T any](batchSize int) Stage[T, []T] {
 }
 
 // FlattenStage flattens batches back into individual events.
-func FlattenStage[T any]() Stage[[]T, T] {
-	return func(in <-chan []T) <-chan T {
-		out := make(chan T, ChannelBufSize)
+func FlattenStage[T any]() Stage[[]*T, *T] {
+	return func(in <-chan []*T) <-chan *T {
+		out := make(chan *T, ChannelBufSize)
 		go func() {
 			defer close(out)
 			for batch := range in {
-				for _, val := range batch {
-					out <- val
+				for _, v := range batch {
+					out <- v
 				}
 			}
 		}()
@@ -209,14 +282,14 @@ func FlattenStage[T any]() Stage[[]T, T] {
 }
 
 // ForEachStage applies the processor to each event in a batch.
-func ForEachStage[T, R any](processor Stage[T, R]) Stage[[]T, []R] {
-	return func(in <-chan []T) <-chan []R {
-		out := make(chan []R, ChannelBufSize)
+func ForEachStage[T, R any](processor Stage[*T, *R]) Stage[[]*T, []*R] {
+	return func(in <-chan []*T) <-chan []*R {
+		out := make(chan []*R, ChannelBufSize)
 		go func() {
 			defer close(out)
 			for batch := range in {
-				results := make([]R, 0, len(batch))
-				batchIn := make(chan T, len(batch))
+				results := make([]*R, 0, len(batch))
+				batchIn := make(chan *T, len(batch))
 				batchOut := processor(batchIn)
 				var wg sync.WaitGroup
 				wg.Add(1)
@@ -226,8 +299,8 @@ func ForEachStage[T, R any](processor Stage[T, R]) Stage[[]T, []R] {
 						results = append(results, r)
 					}
 				}()
-				for _, val := range batch {
-					batchIn <- val
+				for _, v := range batch {
+					batchIn <- v
 				}
 				close(batchIn)
 				wg.Wait()
@@ -239,31 +312,14 @@ func ForEachStage[T, R any](processor Stage[T, R]) Stage[[]T, []R] {
 }
 
 // Chain composes two stages together.
-//
-// Example:
-//
-//	stage := Chain(
-//	    MapStage[int](func(x int) int { return x * 2 }),
-//	    FilterStage[int](func(x int) bool { return x > 5 }),
-//	)
-//	result := Collect(stage, []int{1, 2, 3, 4, 5, 6}) // [6, 8, 10, 12]
 func Chain[I, M, O any](s1 Stage[I, M], s2 Stage[M, O]) Stage[I, O] {
 	return func(in <-chan I) <-chan O {
 		return s2(s1(in))
 	}
 }
 
-// ParallelPipeline adds batching and fanning out to a processor stage.
-//
-// Example:
-//
-//	stage := ParallelPipeline[int, int](
-//	    MapStage[int](func(x int) int { return x * 2 }),
-//	    2, // number of workers
-//	    10, // batch size
-//	)
-//	result := Collect(stage, []int{1, 2, 3, 4, 5, 6})
-func ParallelPipeline[T, R any](processor Stage[T, R], numWorkers int, batchSize int) Stage[T, R] {
+// ParallelPipeline combines batching, fanning out, and flattening into a processor stage.
+func ParallelPipeline[T, R any](processor Stage[*T, *R], numWorkers, batchSize int) Stage[*T, *R] {
 	if numWorkers == 0 {
 		numWorkers = NumWorkers
 	}
@@ -273,7 +329,7 @@ func ParallelPipeline[T, R any](processor Stage[T, R], numWorkers int, batchSize
 	return Chain(
 		BatchStage[T](batchSize),
 		Chain(
-			FanOutStage[[]T, []R](
+			FanOutStage[[]*T, []*R](
 				numWorkers,
 				ForEachStage[T, R](processor),
 			),
@@ -291,14 +347,12 @@ func Collect[I, O any](stage Stage[I, O], input []I) []O {
 			in <- v
 		}
 		close(in)
+		input = nil
 	}()
 	out := stage(in)
 	result := make([]O, 0, len(input))
 	for v := range out {
 		result = append(result, v)
-	}
-	if result == nil {
-		return make([]O, 0)
 	}
 	return result
 }
