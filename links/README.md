@@ -2,7 +2,7 @@
 
 ## Demo Video
 
-- [Mable Pipeline Demo Video](https://streamable.com/qg3zam)
+- [Mable Pipeline Demo Video](https://youtu.be/99aCKrG9aNw)
 
 ## Grafana Dashboards
 
