@@ -182,6 +182,7 @@ func Chain[I, M, O any](s1 Stage[I, M], s2 Stage[M, O]) Stage[I, O]
 func MapStage[T any](f func(*T) *T) Stage[*T, *T]
 ```
 
+- Transforms events by applying a function to each one
 - Uses pointers to avoid copying large structures
 - Allows in-place modification for efficiency
 
@@ -191,8 +192,79 @@ func MapStage[T any](f func(*T) *T) Stage[*T, *T]
 func FilterStage[T any](f func(*T) bool) Stage[*T, *T]
 ```
 
+- Filters events based on a boolean predicate function
 - Simple predicate function interface
 - Zero-copy for events that pass the filter
+
+**ReduceStage:**
+
+```go
+func ReduceStage[T, R any](f func(*T) *R) Stage[*T, *R]
+```
+
+- Transforms events from one type to another
+- Enables type conversion within pipelines
+- Maintains pointer efficiency for large structures
+
+**GenerateStage:**
+
+```go
+func GenerateStage[T any](f func(*T) []*T) Stage[*T, *T]
+```
+
+- Expands single events into multiple events
+- Useful for data enrichment and event multiplication
+- Handles dynamic output generation
+
+**IfStage:**
+
+```go
+func IfStage[T, U any](cond func(*T) bool, thenStage, elseStage Stage[*T, *U]) Stage[*T, *U]
+```
+
+- Provides conditional routing based on predicates
+- Routes events to different processing branches
+- Enables complex decision trees in pipelines
+
+**FanOutStage:**
+
+```go
+func FanOutStage[I, O any](numWorkers int, worker Stage[I, O]) Stage[I, O]
+```
+
+- Distributes work across multiple worker goroutines
+- Implements round-robin load balancing
+- Provides horizontal scaling for CPU-intensive operations
+
+**BatchStage:**
+
+```go
+func BatchStage[T any](batchSize int) Stage[*T, []*T]
+```
+
+- Groups individual events into batches
+- Optimizes throughput by reducing per-event overhead
+- Configurable batch size for different workload characteristics
+
+**FlattenStage:**
+
+```go
+func FlattenStage[T any]() Stage[[]*T, *T]
+```
+
+- Converts batches back to individual events
+- Complements BatchStage for batch processing workflows
+- Maintains event ordering within batches
+
+**ForEachStage:**
+
+```go
+func ForEachStage[T, R any](processor Stage[*T, *R]) Stage[[]*T, []*R]
+```
+
+- Applies processing to each event within a batch
+- Enables parallel processing within batch boundaries
+- Maintains batch structure while transforming contents
 
 **ParallelPipeline:**
 
@@ -200,6 +272,7 @@ func FilterStage[T any](f func(*T) bool) Stage[*T, *T]
 func ParallelPipeline[T, R any](processor Stage[*T, *R], numWorkers, batchSize int) Stage[*T, *R]
 ```
 
+- High-level parallel processing abstraction combining multiple stages
 - Combines batching, fan-out, and flattening into one convenient interface
 - Configurable worker count and batch size for different workloads
 
@@ -209,8 +282,8 @@ func ParallelPipeline[T, R any](processor Stage[*T, *R], numWorkers, batchSize i
 func MetricStage[I, O any](name string, inner Stage[I, O]) Stage[I, O]
 ```
 
+- Wraps any stage to collect performance metrics
 - Uses decorator pattern to wrap any existing stage
-- Collects performance metrics (count, duration, memory usage) automatically
 - Integrates with ClickHouse for time-series storage and Grafana for visualization
 
 ## Areas for Improvement/Optimization
